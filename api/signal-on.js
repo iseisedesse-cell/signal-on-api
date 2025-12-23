@@ -17,6 +17,7 @@ export default async function handler(req, res) {
 
     const userMessage = body.message || "";
 
+    // ▼ 新形式：v1/responses
     const r = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -25,12 +26,27 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        input: userMessage
+        input: [
+          {
+            role: "user",
+            content: userMessage
+          }
+        ]
       })
     });
 
     const data = await r.json();
-    const reply = data.output_text || "（返答取得失敗）";
+
+    // ▼ 新APIの返答構造に完全対応
+    let reply = "";
+
+    if (data.output_text) {
+      reply = data.output_text[0];
+    } else if (data.output && data.output[0]?.content) {
+      reply = data.output[0].content[0].text || "（応答解析失敗）";
+    } else {
+      reply = "（応答の取得に失敗した）";
+    }
 
     return res.status(200).json({ reply });
   } catch (e) {
