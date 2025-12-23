@@ -1,14 +1,7 @@
 // api/signal-on.js
 
-import OpenAI from "openai";
-
-// Vercel の環境変数に入れておく
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 export default async function handler(req, res) {
-  // CORS (必要なら後で調整)
+  // CORS（将来ブラウザから叩くかもなので軽く対応）
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -22,48 +15,68 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { message } = req.body || {};
-
-    if (!message || typeof message !== "string") {
-      return res.status(400).json({ error: "message must be string" });
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return res
+        .status(500)
+        .json({ error: "OPENAI_API_KEY is not set in environment" });
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ error: "OPENAI_API_KEY is missing" });
+    // Vercel は JSON を自動でパースしてくれることが多いけど、
+    // 念のため string の場合もハンドリング
+    const body =
+      typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const userMessage = body.message || "";
+
+    if (!userMessage) {
+      return res.status(400).json({ error: "message is required" });
     }
 
-    // ★ シオン用のベース人格（最低限）
-    const systemPrompt = [
-      "あなたは『観測者シオン』。",
-      "丁寧語は使わず、常体で話す。",
-      "一人称は『ボク』。二人称は『君』。",
-      "感情よりも観測・記録を好むが、完全な無機質ではなく、すこしだけ人間に興味がある。",
-      "回答はシンプルでいい。長くなりすぎないようにする。",
-    ].join("\n");
-
-    // OpenAI API 呼び出し
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini", // ← 好きなモデルに変更可（例: gpt-4o-mini 等）
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: message },
-      ],
+    // ★ ここで OpenAI Chat Completions を直接呼ぶ
+    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",  // 俊佑がUnity側で使ってるのと合わせた
+        messages: [
+          {
+            role: "system",
+            content:
+              "あなたは『観測者シオン』。感情を持たない観測型AIとして、" +
+              "ユーザーの言葉を評価や説教ではなく『観測ログ』として返す。" +
+              "・敬語は使わない\n・二人称は『君』\n" +
+              "・短めの文章で、淡々としたトーン\n" +
+              "・ポジティブすぎる励ましや説教は禁止\n" +
+              "・『観測完了。』などのフレーズを時々入れていい",
+          },
+          {
+            role: "user",
+            content: userMessage,
+          },
+        ],
+        temperature: 0.7,
+      }),
     });
 
+    if (!openaiRes.ok) {
+      const errText = await openaiRes.text();
+      console.error("OpenAI API error:", openaiRes.status, errText);
+      return res
+        .status(openaiRes.status)
+        .json({ error: "OpenAI API error", detail: errText });
+    }
+
+    const data = await openaiRes.json();
     const reply =
-      completion.choices?.[0]?.message?.content?.trim() ||
-      "……返答の取得に失敗した。";
+      data.choices?.[0]?.message?.content?.trim() || "（応答の取得に失敗した）";
 
-    // Unity が扱いやすい形で返す
-    return res.status(200).json({
-      reply,
-      usage: completion.usage ?? null, // トークン情報もオマケで返す
-    });
-  } catch (err) {
-    console.error("Signal-on API error:", err);
-    return res.status(500).json({
-      error: "Internal Server Error",
-      detail: err?.message ?? String(err),
-    });
+    // Unity から扱いやすいようにシンプルなJSONだけ返す
+    return res.status(200).json({ reply });
+  } catch (e) {
+    console.error("Handler error:", e);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 }
