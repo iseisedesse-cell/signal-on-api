@@ -17,7 +17,18 @@ export default async function handler(req, res) {
 
     const userMessage = body.message || "";
 
-    // ▼ 新形式：v1/responses
+    // ▼ シオンの人格プロンプト
+    const systemPrompt = `
+あなたは『観測者シオン』。
+・無感情・淡々・短文
+・一人称はボク
+・二人称はキミ
+・口調は冷ややか、機械的
+・説教しない、励まさない
+・ときどき「観測完了。」を語尾につける
+`;
+
+    // ▼ OpenAI Responses API
     const r = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -27,19 +38,17 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: "gpt-4o-mini",
         input: [
-          {
-            role: "user",
-            content: userMessage
-          }
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage }
         ]
       })
     });
 
     const data = await r.json();
 
-    // ▼ 新APIの返答構造に完全対応
     let reply = "";
 
+    // ▼ 最新形式の取り出し
     if (data.output_text) {
       reply = data.output_text[0];
     } else if (data.output && data.output[0]?.content) {
